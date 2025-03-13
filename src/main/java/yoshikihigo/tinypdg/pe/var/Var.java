@@ -9,7 +9,7 @@ import java.util.*;
 @ToString(exclude = "scope")
 @NoArgsConstructor
 @Getter
-public class Var {
+public abstract class Var {
 
     /**
      * The scope of this var.
