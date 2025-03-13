@@ -1,26 +1,8 @@
 package yoshikihigo.tinypdg.graphviz;
 
-import java.io.BufferedWriter;
-import java.io.File;
-import java.io.FileWriter;
-import java.io.IOException;
-import java.util.ArrayList;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.SortedMap;
-import java.util.SortedSet;
-import java.util.TreeMap;
-import java.util.TreeSet;
-
-import org.apache.commons.cli.CommandLine;
-import org.apache.commons.cli.CommandLineParser;
-import org.apache.commons.cli.Option;
-import org.apache.commons.cli.Options;
-import org.apache.commons.cli.PosixParser;
+import org.apache.commons.cli.*;
 import org.eclipse.jdt.core.dom.CompilationUnit;
-
-import yoshikihigo.tinypdg.ast.TinyPDGASTVisitor;
+import yoshikihigo.tinypdg.ast.PEASTVisitor;
 import yoshikihigo.tinypdg.cfg.CFG;
 import yoshikihigo.tinypdg.cfg.edge.CFGEdge;
 import yoshikihigo.tinypdg.cfg.node.CFGControlNode;
@@ -31,13 +13,15 @@ import yoshikihigo.tinypdg.pdg.edge.PDGControlDependenceEdge;
 import yoshikihigo.tinypdg.pdg.edge.PDGDataDependenceEdge;
 import yoshikihigo.tinypdg.pdg.edge.PDGEdge;
 import yoshikihigo.tinypdg.pdg.edge.PDGExecutionDependenceEdge;
-import yoshikihigo.tinypdg.pdg.node.PDGControlNode;
-import yoshikihigo.tinypdg.pdg.node.PDGMethodEnterNode;
-import yoshikihigo.tinypdg.pdg.node.PDGNode;
-import yoshikihigo.tinypdg.pdg.node.PDGNodeFactory;
-import yoshikihigo.tinypdg.pdg.node.PDGParameterNode;
+import yoshikihigo.tinypdg.pdg.node.*;
 import yoshikihigo.tinypdg.pe.MethodInfo;
 import yoshikihigo.tinypdg.pe.ProgramElementInfo;
+
+import java.io.BufferedWriter;
+import java.io.File;
+import java.io.FileWriter;
+import java.io.IOException;
+import java.util.*;
 
 public class Writer {
 
@@ -105,12 +89,10 @@ public class Writer {
 			final List<File> files = getFiles(target);
 			final List<MethodInfo> methods = new ArrayList<MethodInfo>();
 			for (final File file : files) {
-				final CompilationUnit unit = TinyPDGASTVisitor.createAST(file);
-				final List<MethodInfo> m = new ArrayList<MethodInfo>();
-				final TinyPDGASTVisitor visitor = new TinyPDGASTVisitor(
-						file.getAbsolutePath(), unit, methods);
+				final CompilationUnit unit = PEASTVisitor.createAST(file);
+				final PEASTVisitor visitor = new PEASTVisitor(unit);
 				unit.accept(visitor);
-				methods.addAll(m);
+				methods.addAll(visitor.getMethods());
 			}
 
 			if (cmd.hasOption("c")) {

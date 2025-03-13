@@ -1,39 +1,88 @@
+/*
+ * Copyright 2024 Ma Yingshuo
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package yoshikihigo.tinypdg.pe;
 
+import yoshikihigo.tinypdg.pe.var.ScopeManager;
+import yoshikihigo.tinypdg.pe.var.VarDef;
+import lombok.Getter;
+
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.SortedSet;
-import java.util.TreeSet;
 
+/**
+ * Describe the information of a method (in the ast).
+ */
+@Getter
 public class MethodInfo extends ProgramElementInfo implements BlockInfo {
 
-	final public String path;
+	/**
+     * The scope manager used for creating scopes.
+     */
+    private final ScopeManager scopeManager;
+
+	/**
+	 * Used for lambda expression. Mark whether this is a lambda method.
+	 */
+	final public boolean lambda;
+
+	/**
+	 * Used for lambda expression.
+	 * If lambda expression only consists of 1 expression, then this is it.
+	 */
+	private ExpressionInfo lambdaExpression;
+
+	/**
+	 * The name of the method.
+	 */
 	final public String name;
-	final private List<VariableInfo> parameters;
-	final private List<StatementInfo> statements;
 
-	public MethodInfo(final String path, final String name,
-			final int startLine, final int endLine) {
+	/**
+	 * The parameter VariableInfos.
+	 */
+	final private List<VariableDeclarationInfo> parameters = new ArrayList<>();
 
-		super(startLine, endLine);
-
-		this.path = path;
-		this.name = name;
-		this.parameters = new ArrayList<VariableInfo>();
-		this.statements = new ArrayList<StatementInfo>();
+	public List<VariableDeclarationInfo> getParameters() {
+		return Collections.unmodifiableList(parameters);
 	}
 
-	public void addParameter(final VariableInfo parameter) {
+	/**
+	 * The statements inside the block.
+	 */
+	final private List<StatementInfo> statements = new ArrayList<>();
+
+	public List<StatementInfo> getStatements() {
+		return Collections.unmodifiableList(statements);
+	}
+
+	public MethodInfo(final ScopeManager scopeManager, final boolean lambda, final String name,
+					  final Object node, final int startLine, final int endLine) {
+		super(node, startLine, endLine);
+		this.scopeManager = scopeManager;
+		this.lambda = lambda;
+		this.name = name;
+	}
+
+	/**
+	 * Add a parameter VariableInfo.
+	 * @param parameter The parameter info to add
+	 */
+	public void addParameter(final VariableDeclarationInfo parameter) {
 		assert null != parameter : "\"variable\" is null.";
 		this.parameters.add(parameter);
-	}
-
-	public SortedSet<VariableInfo> getParameters() {
-		final SortedSet<VariableInfo> parameters = new TreeSet<VariableInfo>();
-		parameters.addAll(this.parameters);
-		return parameters;
 	}
 
 	@Override
@@ -53,33 +102,42 @@ public class MethodInfo extends ProgramElementInfo implements BlockInfo {
 		this.statements.add(statement);
 	}
 
-	@Override
-	public void addStatements(final Collection<StatementInfo> statements) {
-		assert null != statements : "\"statements\" is null.";
-		this.statements.addAll(statements);
+	/**
+	 * Set the lambda expression if this is a single-expression lambda function.
+	 * @param lambdaExpression The single expression in this lambda function
+	 */
+	public void setLambdaExpression(ExpressionInfo lambdaExpression) {
+		assert lambda : "\"lambda\" is false.";
+		this.lambdaExpression = lambdaExpression;
 	}
 
 	@Override
-	public List<StatementInfo> getStatements() {
-		return Collections.unmodifiableList(this.statements);
-	}
-
-	@Override
-	public SortedSet<String> getAssignedVariables() {
-		final SortedSet<String> variables = new TreeSet<String>();
-		for (final StatementInfo statement : this.statements) {
-			variables.addAll(statement.getAssignedVariables());
+	protected void doCalcDefVariables() {
+		// Make sure that the parameters are calculated firstly
+		for (final VariableDeclarationInfo parameter : this.parameters) {
+			parameter.getDefVariables().forEach(paramDef -> {
+				VarDef def = new VarDef(scopeManager.getScope(this),
+						paramDef.getMainVariableName(), paramDef.getVariableNameAliases(), paramDef.getType());
+				def.updateScope();
+				this.addVarDef(def);
+			});
 		}
-		return variables;
+		for (final StatementInfo statement : this.statements) {
+			statement.getDefVariables().forEach(this::addVarDef);
+		}
+		if (lambda && lambdaExpression != null) {
+			lambdaExpression.getDefVariables().forEach(this::addVarDef);
+		}
 	}
 
 	@Override
-	public SortedSet<String> getReferencedVariables() {
-		final SortedSet<String> variables = new TreeSet<String>();
+	protected void doCalcUseVariables() {
 		for (final StatementInfo statement : this.statements) {
-			variables.addAll(statement.getReferencedVariables());
+			statement.getUseVariables().forEach(this::addVarUse);
 		}
-		return variables;
+		if (lambda && lambdaExpression != null) {
+			lambdaExpression.getUseVariables().forEach(this::addVarUse);
+		}
 	}
 
 }

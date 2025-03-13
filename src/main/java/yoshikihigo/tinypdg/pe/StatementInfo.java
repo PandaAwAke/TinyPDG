@@ -1,283 +1,440 @@
+/*
+ * Copyright 2024 Ma Yingshuo
+ * Licensed under the Apache License, Version 2.0 (the "License");
+ * you may not use this file except in compliance with the License.
+ * You may obtain a copy of the License at
+ *
+ * http://www.apache.org/licenses/LICENSE-2.0
+ *
+ * Unless required by applicable law or agreed to in writing, software
+ * distributed under the License is distributed on an "AS IS" BASIS,
+ * WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+ * See the License for the specific language governing permissions and
+ * limitations under the License.
+ */
+
 package yoshikihigo.tinypdg.pe;
 
+import yoshikihigo.tinypdg.pe.var.Scope;
+import yoshikihigo.tinypdg.pe.var.ScopeManager;
+import yoshikihigo.tinypdg.pe.var.VarDef;
+import yoshikihigo.tinypdg.pe.var.VarUse;
+import lombok.Getter;
+import lombok.Setter;
+import org.eclipse.jdt.core.dom.ASTNode;
+
 import java.util.ArrayList;
-import java.util.Collection;
 import java.util.Collections;
 import java.util.List;
-import java.util.SortedSet;
-import java.util.TreeSet;
+import java.util.Set;
 
+/**
+ * Describe the information of a statement (in the ast).
+ */
+@Getter
 public class StatementInfo extends ProgramElementInfo implements BlockInfo {
 
-	private ProgramElementInfo ownerBlock;
-	private CATEGORY category;
-	private List<ProgramElementInfo> expressions;
+    /**
+     * The scope manager used for creating scopes.
+     */
+    private final ScopeManager scopeManager;
 
-	final private List<ProgramElementInfo> initializers;
-	private ProgramElementInfo condition;
-	final private List<ProgramElementInfo> updaters;
+    /**
+     * The ownerBlock of this statement (if exists).
+     */
+    private final ProgramElementInfo ownerBlock;
 
-	final private List<StatementInfo> statements;
-	private List<StatementInfo> elseStatements;
-	final private List<StatementInfo> catchStatements;
-	private StatementInfo finallyStatement;
+    /**
+     * The category of this statement.
+     */
+    public final CATEGORY category;
 
-	private String label;
+    /**
+     * If this is a conditional block (such as If or While),
+     * here is the condition element.
+     */
+    private ProgramElementInfo condition;
 
-	public StatementInfo(final ProgramElementInfo ownerBlock,
-			final CATEGORY category, final int startLine, final int endLine) {
+    /**
+     * All children expressions in this statement.
+     * In fact this list might contain many types of ProgramElementInfo (except BlockInfo)
+     */
+    private final List<ProgramElementInfo> expressions = new ArrayList<>();
 
-		super(startLine, endLine);
+    public List<ProgramElementInfo> getExpressions() {
+        return Collections.unmodifiableList(expressions);
+    }
 
-		this.ownerBlock = ownerBlock;
-		this.category = category;
-		this.expressions = new ArrayList<ProgramElementInfo>();
+    /**
+     * Used for "For" and "Foreach" statement.
+     * Records the initializer expressions in the "for" loop.
+     */
+    private final List<ProgramElementInfo> initializers = new ArrayList<>();
 
-		this.initializers = new ArrayList<ProgramElementInfo>();
-		this.condition = null;
-		this.updaters = new ArrayList<ProgramElementInfo>();
+    public List<ProgramElementInfo> getInitializers() {
+        return Collections.unmodifiableList(initializers);
+    }
 
-		this.statements = new ArrayList<StatementInfo>();
-		this.elseStatements = new ArrayList<StatementInfo>();
-		this.catchStatements = new ArrayList<StatementInfo>();
-		this.finallyStatement = null;
+    /**
+     * Used for "For" and "Foreach" statement.
+     * Records the updater expressions in the "for" loop.
+     */
+    private final List<ProgramElementInfo> updaters = new ArrayList<>();
 
-		this.label = null;
-	}
+    public List<ProgramElementInfo> getUpdaters() {
+        return Collections.unmodifiableList(updaters);
+    }
 
-	public enum CATEGORY {
+    /**
+     * All children statements in this statement.
+     * In fact this list might contain many types of ProgramElementInfo (except BlockInfo)
+     */
+    private final List<StatementInfo> statements = new ArrayList<>();
 
-		Assert("ASSERT"), Break("BREAK"), Case("CASE"), Catch("CATCH"), Continue(
-				"CONTINUE"), Do("DO"), Empty("Empty"), Expression("EXPRESSION"), If(
-				"IF"), For("FOR"), Foreach("FOREACH"), Return("RETURN"), SimpleBlock(
-				"SimpleBlock"), Synchronized("SYNCHRONIZED"), Switch("SWITCH"), Throw(
-				"SWITCH"), Try("TRY"), TypeDeclaration("TYPEDECLARATION"), VariableDeclaration(
-				"VARIABLEDECLARATION"), While("WHILE");
+    public List<StatementInfo> getStatements() {
+        return Collections.unmodifiableList(statements);
+    }
 
-		final public String id;
+    /**
+     * Used for "If" statement.
+     * Records the statements in "else" block.
+     */
+    private final List<StatementInfo> elseStatements = new ArrayList<>();
 
-		CATEGORY(final String id) {
-			this.id = id;
-		}
-	}
+    public List<StatementInfo> getElseStatements() {
+        return Collections.unmodifiableList(elseStatements);
+    }
 
-	public ProgramElementInfo getOwnerBlock() {
-		return this.ownerBlock;
-	}
+    /**
+     * Used for "Try" statement.
+     * Records the "catch" blocks.
+     */
+    private final List<StatementInfo> catchStatements = new ArrayList<>();
 
-	public void setOwnerBlock(final ProgramElementInfo ownerBlock) {
-		assert null != "\"ownerBlock\" is null.";
-		this.ownerBlock = ownerBlock;
-	}
+    public List<StatementInfo> getCatchStatements() {
+        return Collections.unmodifiableList(catchStatements);
+    }
 
-	public CATEGORY getCategory() {
-		return this.category;
-	}
+    /**
+     * Used for "Try" statement.
+     * Records the "finally" block.
+     */
+    private StatementInfo finallyStatement;
 
-	public void setCategory(final CATEGORY category) {
-		assert null != "\"category\" is null.";
-		this.category = category;
-	}
+    /**
+     * If this is a LabeledStatement, here is the label of it.
+     * @see org.eclipse.jdt.core.dom.LabeledStatement
+     */
+    @Setter
+    private String label;
 
-	public void addInitializer(final ProgramElementInfo initializer) {
-		assert null != initializer : "\"initializer\" is null.";
-		this.initializers.add(initializer);
-	}
+    public StatementInfo(final ScopeManager scopeManager,
+                         final ProgramElementInfo ownerBlock,
+                         final CATEGORY category,
+                         final ASTNode node,
+                         final int startLine,
+                         final int endLine) {
+        super(node, startLine, endLine);
 
-	public void setCondition(final ProgramElementInfo condition) {
-		assert null != condition : "\"condition\" is null.";
-		this.condition = condition;
-	}
+        this.scopeManager = scopeManager;
 
-	public void addUpdater(final ProgramElementInfo updater) {
-		assert null != updater : "\"updater\" is null.";
-		this.updaters.add(updater);
-	}
+        this.ownerBlock = ownerBlock;
+        this.category = category;
 
-	public List<ProgramElementInfo> getInitializers() {
-		final List<ProgramElementInfo> initializers = new ArrayList<ProgramElementInfo>();
-		initializers.addAll(this.initializers);
-		return initializers;
-	}
+        this.condition = null;
+        this.finallyStatement = null;
 
-	public ProgramElementInfo getCondition() {
-		return this.condition;
-	}
+        this.label = null;
+    }
 
-	public List<ProgramElementInfo> getUpdaters() {
-		final List<ProgramElementInfo> updaters = new ArrayList<ProgramElementInfo>();
-		updaters.addAll(this.updaters);
-		return updaters;
-	}
+    /**
+     * Used for Continue and Break statement.
+     * Get the label to jump (if exists), such as "jumpOut" in "break jumpOut".
+     * @return The label to jump (if exists)
+     */
+    public String getJumpToLabel() {
+        if (this.category != CATEGORY.Break && this.category != CATEGORY.Continue) {
+            return null;
+        }
+        if (this.expressions.isEmpty()) {
+            return null;
+        } else {
+            return this.expressions.get(0).getText();
+        }
+    }
 
-	@Override
-	public void setStatement(final StatementInfo statement) {
-		assert null != statement : "\"statement\" is null.";
-		this.statements.clear();
-		if (StatementInfo.CATEGORY.SimpleBlock == statement.getCategory()) {
-			if (statement.getStatements().isEmpty()) {
-				this.statements.add(statement);
-			} else {
-				this.statements.addAll(statement.getStatements());
-			}
-		} else {
-			this.statements.add(statement);
-		}
-	}
+    /**
+     * All supported statement types.
+     */
+    public enum CATEGORY {
+        Assert,
+        Break,
+        Case,
+        Catch,
+        Continue,
+        Do,
+        Empty,
+        Expression,
+        If,
+        For,
+        Foreach,
+        Return,
+        SimpleBlock,
+        Synchronized,
+        Switch,
+        Throw,
+        Try,
+        TypeDeclaration,
+        VariableDeclaration,
+        While,
+    }
 
-	@Override
-	public void addStatement(final StatementInfo statement) {
-		assert null != statement : "\"statement\" is null.";
-		this.statements.add(statement);
-	}
+    public void addInitializer(final ProgramElementInfo initializer) {
+        assert null != initializer : "\"initializer\" is null.";
+        this.initializers.add(initializer);
+    }
 
-	@Override
-	public void addStatements(final Collection<StatementInfo> statements) {
-		assert null != statements : "\"statements\" is null.";
-		this.statements.addAll(statements);
-	}
+    public void setCondition(final ProgramElementInfo condition) {
+        assert null != condition : "\"condition\" is null.";
+        this.condition = condition;
+    }
 
-	@Override
-	public List<StatementInfo> getStatements() {
-		return Collections.unmodifiableList(this.statements);
-	}
+    public void addUpdater(final ProgramElementInfo updater) {
+        assert null != updater : "\"updater\" is null.";
+        this.updaters.add(updater);
+    }
 
-	public void setElseStatement(final StatementInfo elseBody) {
-		assert null != elseBody : "\"elseStatement\" is null.";
-		this.elseStatements.clear();
-		if (StatementInfo.CATEGORY.SimpleBlock == elseBody.getCategory()) {
-			this.elseStatements.addAll(elseBody.getStatements());
-		} else {
-			this.elseStatements.add(elseBody);
-		}
-	}
+    @Override
+    public void setStatement(final StatementInfo statement) {
+        assert null != statement : "\"statement\" is null.";
+        this.statements.clear();
+        if (CATEGORY.SimpleBlock == statement.getCategory()) {
+            if (statement.getStatements().isEmpty()) {
+                this.statements.add(statement);
+            } else {
+                this.statements.addAll(statement.getStatements());
+            }
+        } else {
+            this.statements.add(statement);
+        }
+    }
 
-	public List<StatementInfo> getElseStatements() {
-		return Collections.unmodifiableList(this.elseStatements);
-	}
+    @Override
+    public void addStatement(final StatementInfo statement) {
+        assert null != statement : "\"statement\" is null.";
+        this.statements.add(statement);
+    }
 
-	public void addCatchStatement(final StatementInfo catchStatement) {
-		assert null != catchStatement : "\"catchStatement\" is null.";
-		this.catchStatements.add(catchStatement);
-	}
+    public void setElseStatement(final StatementInfo elseBody) {
+        assert null != elseBody : "\"elseStatement\" is null.";
+        this.elseStatements.clear();
+        if (CATEGORY.SimpleBlock == elseBody.getCategory()) {
+            this.elseStatements.addAll(elseBody.getStatements());
+        } else {
+            this.elseStatements.add(elseBody);
+        }
+    }
 
-	public List<StatementInfo> getCatchStatements() {
-		return Collections.unmodifiableList(this.catchStatements);
-	}
+    public void addCatchStatement(final StatementInfo catchStatement) {
+        assert null != catchStatement : "\"catchStatement\" is null.";
+        this.catchStatements.add(catchStatement);
+    }
 
-	public void setFinallyStatement(final StatementInfo finallyStatement) {
-		assert null != finallyStatement : "\"finallyStatement\" is null.";
-		this.finallyStatement = finallyStatement;
-	}
+    public void setFinallyStatement(final StatementInfo finallyStatement) {
+        assert null != finallyStatement : "\"finallyStatement\" is null.";
+        this.finallyStatement = finallyStatement;
+    }
 
-	public StatementInfo getFinallyStatement() {
-		return this.finallyStatement;
-	}
+    public void addExpression(final ProgramElementInfo element) {
+        assert null != element : "\"element\" is null.";
+        this.expressions.add(element);
+    }
 
-	public void addExpression(final ProgramElementInfo element) {
-		assert null != element : "\"element\" is null.";
-		this.expressions.add(element);
-	}
 
-	public List<ProgramElementInfo> getExpressions() {
-		final List<ProgramElementInfo> list = new ArrayList<ProgramElementInfo>();
-		list.addAll(this.expressions);
-		return list;
-	}
+    /**
+     * Add a var def with our "ownerBlock" scope.
+     * @param varDef Var def
+     */
+    @Override
+    protected void addVarDef(VarDef varDef) {
+        Scope defScope = varDef.getScope();
+        String defMainVariableName = varDef.getMainVariableName();
+        Set<String> defVariableNameAliases = varDef.getVariableNameAliases();
+        VarDef.Type defType = varDef.getType();
+        StatementInfo defRelevantStmt = varDef.getRelevantStmt();
 
-	@Override
-	public SortedSet<String> getAssignedVariables() {
+        Scope ourScope = scopeManager.getScope(this.ownerBlock);
 
-		final SortedSet<String> variables = new TreeSet<String>();
+        if (varDef.getScope() == null) {
+            // This def does not have a scope yet (it may be set by recursively AST traverse)
+            // Try to create one for it
 
-		for (final ProgramElementInfo expression : this.expressions) {
-			variables.addAll(expression.getAssignedVariables());
-		}
+            // Case 1: it is a DECLARE, create it in ourScope
+            if (varDef.getType().isAtLeastDeclare()) {
+                defScope = ourScope;
+            } else {
+                // Case 2: this def is not a DECLARE, try to find it in our scope
+                Scope matchedScope = ourScope.searchVariableDef(varDef.getMainVariableName());
+                if (matchedScope != null) {
+                    // Found a matched scope (including myself), set it
+                    defScope = matchedScope;
+                } else {
+                    // This var was not declared
+                    // It is most likely a this.xxx def, set scope to null
+                    defScope = null;
+                }
+            }
+        }
 
-		for (final ProgramElementInfo initializer : this.initializers) {
-			variables.addAll(initializer.getAssignedVariables());
-		}
+        if (defScope == null && TREAT_NON_LOCAL_VARIABLE_AS_FIELD) {
+            // Actually the var is a field of "this", let's change its main name and aliases
+            if (defMainVariableName != null && !defMainVariableName.isEmpty()) {
+                if (!TREAT_FIELD_EXCLUDE_UPPERCASE || !Character.isUpperCase(defMainVariableName.charAt(0))) {
+                    if (!defMainVariableName.startsWith("this.")) {
+                        String defMainVariableNameWithThis = "this." + defMainVariableName;
+                        defVariableNameAliases = Set.of(defMainVariableName, defMainVariableNameWithThis);
+                        defMainVariableName = defMainVariableNameWithThis;
+                    }
+                }
+            }
 
-		if (null != this.condition) {
-			variables.addAll(this.condition.getAssignedVariables());
-		}
+        }
 
-		for (final ProgramElementInfo updater : this.updaters) {
-			variables.addAll(updater.getAssignedVariables());
-		}
+        if (defRelevantStmt == null) {
+            defRelevantStmt = this;
+        }
 
-		for (final StatementInfo statement : this.statements) {
-			variables.addAll(statement.getAssignedVariables());
-		}
+        VarDef def = new VarDef(defScope, defMainVariableName, defVariableNameAliases, defType, defRelevantStmt);
+        
+        if (defScope != null) {
+            def.updateScope();
+        }
 
-		for (final StatementInfo statement : this.elseStatements) {
-			variables.addAll(statement.getAssignedVariables());
-		}
+        super.addVarDef(def);
+    }
 
-		for (final StatementInfo catchStatement : this.catchStatements) {
-			variables.addAll(catchStatement.getAssignedVariables());
-		}
+    /**
+     * Add a var use with our "ownerBlock" scope.
+     * @param varUse Var use
+     */
+    @Override
+    protected void addVarUse(VarUse varUse) {
+        Scope useScope = varUse.getScope();
+        String useMainVariableName = varUse.getMainVariableName();
+        Set<String> useVariableNameAliases = varUse.getVariableNameAliases();
+        VarUse.Type useType = varUse.getType();
+        StatementInfo useRelevantStmt = varUse.getRelevantStmt();
 
-		if (null != this.finallyStatement) {
-			variables.addAll(this.finallyStatement.getAssignedVariables());
-		}
+        Scope ourScope = scopeManager.getScope(this.ownerBlock);
 
-		return variables;
-	}
+        if (varUse.getScope() == null) {
+            // This use does not have a scope yet (it may be set by recursively AST traverse)
+            // Try to create one for it
+            Scope matchedScope = ourScope.searchVariableDef(varUse.getMainVariableName());
+            if (matchedScope != null) {
+                // Found a matched scope (including myself), set it
+                useScope = matchedScope;
+            } else {
+                // This var was not declared
+                // It is most likely a this.xxx use, set scope to null
+                useScope = null;
+            }
+        }
 
-	@Override
-	public SortedSet<String> getReferencedVariables() {
+        if (useScope == null && TREAT_NON_LOCAL_VARIABLE_AS_FIELD) {
+            // Actually the var is a field of "this", let's change its main name and aliases
+            if (useMainVariableName != null && !useMainVariableName.isEmpty()) {
+                if (!TREAT_FIELD_EXCLUDE_UPPERCASE || !Character.isUpperCase(useMainVariableName.charAt(0))) {
+                    if (!useMainVariableName.startsWith("this.")) {
+                        String useMainVariableNameWithThis = "this." + useMainVariableName;
+                        useVariableNameAliases = Set.of(useMainVariableName, useMainVariableNameWithThis);
+                        useMainVariableName = useMainVariableNameWithThis;
+                    }
+                }
+            }
+        }
 
-		final SortedSet<String> variables = new TreeSet<String>();
+        if (useRelevantStmt == null) {
+            useRelevantStmt = this;
+        }
 
-		for (final ProgramElementInfo expression : this.expressions) {
-			variables.addAll(expression.getReferencedVariables());
-		}
+        VarUse use = new VarUse(useScope, useMainVariableName, useVariableNameAliases, useType, useRelevantStmt);
 
-		for (final ProgramElementInfo initializer : this.initializers) {
-			variables.addAll(initializer.getReferencedVariables());
-		}
+        if (useScope != null) {
+            use.updateScope();
+        }
 
-		if (null != this.condition) {
-			variables.addAll(this.condition.getReferencedVariables());
-		}
+        super.addVarUse(use);
+    }
 
-		for (final ProgramElementInfo updater : this.updaters) {
-			variables.addAll(updater.getReferencedVariables());
-		}
+    @Override
+    protected void doCalcDefVariables() {
+        for (final ProgramElementInfo expression : this.expressions) {
+            expression.getDefVariables().forEach(this::addVarDef);
+        }
 
-		for (final StatementInfo statement : this.statements) {
-			variables.addAll(statement.getReferencedVariables());
-		}
+        for (final ProgramElementInfo initializer : this.initializers) {
+            initializer.getDefVariables().forEach(this::addVarDef);
+        }
 
-		for (final StatementInfo statement : this.elseStatements) {
-			variables.addAll(statement.getReferencedVariables());
-		}
+        if (null != this.condition) {
+            this.condition.getDefVariables().forEach(this::addVarDef);
+        }
 
-		for (final StatementInfo catchStatement : this.catchStatements) {
-			variables.addAll(catchStatement.getReferencedVariables());
-		}
+        for (final ProgramElementInfo updater : this.updaters) {
+            updater.getDefVariables().forEach(this::addVarDef);
+        }
 
-		if (null != this.finallyStatement) {
-			variables.addAll(this.finallyStatement.getReferencedVariables());
-		}
+        for (final StatementInfo statement : this.statements) {
+            statement.getDefVariables().forEach(this::addVarDef);
+        }
 
-		return variables;
-	}
+        for (final StatementInfo statement : this.elseStatements) {
+            statement.getDefVariables().forEach(this::addVarDef);
+        }
 
-	public String getLabel() {
-		return this.label;
-	}
+        for (final StatementInfo catchStatement : this.catchStatements) {
+            catchStatement.getDefVariables().forEach(this::addVarDef);
+        }
 
-	public void setLabel(final String label) {
-		this.label = label;
-	}
+        if (null != this.finallyStatement) {
+            this.finallyStatement.getDefVariables().forEach(this::addVarDef);
+        }
+    }
 
-	public String getJumpToLabel() {
-		if (0 == this.expressions.size()) {
-			return null;
-		} else {
-			return this.expressions.get(0).getText();
-		}
-	}
+    @Override
+    protected void doCalcUseVariables() {
+        for (final ProgramElementInfo expression : this.expressions) {
+            expression.getUseVariables().forEach(this::addVarUse);
+        }
+
+        for (final ProgramElementInfo initializer : this.initializers) {
+            initializer.getUseVariables().forEach(this::addVarUse);
+        }
+
+        if (null != this.condition) {
+            this.condition.getUseVariables().forEach(this::addVarUse);
+        }
+
+        for (final ProgramElementInfo updater : this.updaters) {
+            updater.getUseVariables().forEach(this::addVarUse);
+        }
+
+        for (final StatementInfo statement : this.statements) {
+            statement.getUseVariables().forEach(this::addVarUse);
+        }
+
+        for (final StatementInfo statement : this.elseStatements) {
+            statement.getUseVariables().forEach(this::addVarUse);
+        }
+
+        for (final StatementInfo catchStatement : this.catchStatements) {
+            catchStatement.getUseVariables().forEach(this::addVarUse);
+        }
+
+        if (null != this.finallyStatement) {
+            this.finallyStatement.getUseVariables().forEach(this::addVarUse);
+        }
+    }
+
 }
